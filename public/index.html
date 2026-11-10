@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#050b08"><title>MOSKO WIRE</title>
+<style>
+:root{--g:#39ff88}*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:22px;background:radial-gradient(ellipse at 50% 8%,#153d27,#07120c 48%,#030604);font-family:Arial,sans-serif;color:#eafff1}
+.card{width:min(450px,100%);padding:34px 28px;background:linear-gradient(145deg,#102319ee,#07100bee);border:1px solid #39ff8850;border-radius:25px;box-shadow:0 0 38px #25ff7622,inset 0 0 25px #39ff8808}
+.logo{text-align:center;font-size:31px;font-weight:900;letter-spacing:4px;color:var(--g);text-shadow:0 0 18px #39ff88}.sub{text-align:center;color:#9bb9a5;margin:9px 0 30px;font-size:11px;letter-spacing:3px}
+label{display:block;font-size:12px;color:#b6d9c1;margin-bottom:9px;letter-spacing:1px}input{width:100%;padding:16px;border-radius:12px;border:1px solid #39ff8850;background:#030906;color:white;outline:none;font-size:15px;letter-spacing:1px}input:focus{border-color:var(--g);box-shadow:0 0 15px #39ff8830}
+button{width:100%;;border:0;border-radius:12px;padding:15px;margin-top:17px;background:linear-gradient(90deg,#24d96b,#75ff9e);color:#041008;font-weight:900;letter-spacing:1px;cursor:pointer;box-shadow:0 0 22px #39ff8840}
+.msg{display:none;padding:12px;border-radius:10px;margin:0 0 15px;font-size:13px}.error{color:#ffaaaa;background:#4a111130;border:1px solid #ff686850}.success{color:#baffd0;background:#123b2430;border:1px solid #39ff8850}
+.result{display:none;margin-top:22px}.url{overflow-wrap:anywhere;padding:14px;background:#020805;border:1px solid #39ff8850;border-radius:10px;color:#baffd0;font-size:12px}.small{text-align:center;color:#72927e;font-size:11px;margin-top:22px}
+</style>
+</head>
+<body>
+<main class="card">
+  <div class="logo">MOSKO WIRE</div><div class="sub">SECURE SUBSCRIPTION ACCESS</div>
+  <div id="message" class="msg"></div>
+  <form id="loginForm">
+    <label for="key">SUBSCRIPTION KEY</label>
+    <input id="key" placeholder="MOSKO-XXXX-XXXX-XXXX-XXXX" autocomplete="off" required maxlength="64">
+    <button id="submit" type="submit">VERIFY &amp; GENERATE LINK</button>
+  </form>
+  <section id="result" class="result">
+    <div class="success msg" style="display:block">SUBSCRIPTION LINK READY</div>
+    <div id="happLink" class="url"></div>
+    <button id="copy" type="button">COPY HAPP LINK</button>
+  </section>
+  <div class="small">MOSKO WIRE · AUTOMATIC KEY VALIDATION</div>
+</main>
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
+import { getDatabase, ref, get } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-database.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyBQF-tsl6ARHNb0Ze7zC5aqL8Tix4NhCyc",
+  authDomain: "mosko-wire.firebaseapp.com",
+  databaseURL: "https://mosko-wire-default-rtdb.firebaseio.com",
+  projectId: "mosko-wire",
+  storageBucket: "mosko-wire.firebasestorage.app",
+  messagingSenderId: "354230428514",
+  appId: "1:354230428514:web:a9b7cea91fb8768337c23b",
+  measurementId: "G-5T0T8B7YSQ"
+};
+const app=initializeApp(firebaseConfig), db=getDatabase(app);
+const $=id=>document.getElementById(id);
+function message(text,type="error"){const el=$("message");el.textContent=text;el.className="msg "+type;el.style.display="block";}
+function expiryOf(record){
+  const now=Date.now();
+  for(const field of ["expiresAt","expireAt","expiredAt","expiry","validUntil"]){
+    const raw=record[field]; if(raw!==undefined&&raw!==null&&raw!==""){
+      let n=Number(raw); if(!Number.isFinite(n)) continue; if(n<20000000000)n*=1000; return n;
+    }
+  }
+  const first=Number(record.firstLogin), value=Number(record.durationValue);
+  if(Number.isFinite(first)&&first>0&&Number.isFinite(value)&&value>0){
+    const firstMs=first<20000000000?first*1000:first;
+    const units={minute:60000,minutes:60000,min:60000,hour:3600000,hours:3600000,day:86400000,days:86400000,week:604800000,weeks:604800000};
+    return firstMs+value*(units[String(record.durationUnit||"hours").toLowerCase()]||3600000);
+  }
+  return null;
+}
+function isActive(record){
+  const status=String(record.keyStatus??record.status??"").toUpperCase();
+  if(["EXPIRED","INACTIVE","DISABLED","REVOKED","BANNED"].includes(status))return false;
+  const exp=expiryOf(record); if(exp!==null&&exp<=Date.now())return false;
+  return ["ACTIVE","VALID","ENABLED"].includes(status);
+}
+$("loginForm").addEventListener("submit",async e=>{
+  e.preventDefault(); $("result").style.display="none";
+  const key=$("key").value.trim().toUpperCase();
+  if(!/^MOSKO-[A-Z0-9]{4}(?:-[A-Z0-9]{4}){3}$/.test(key)){message("Invalid key format.");return;}
+  $("submit").disabled=true;$("submit").textContent="VERIFYING...";
+  try{
+    const snap=await get(ref(db,"keys/"+key));
+    if(!snap.exists()){message("Key not found.");return;}
+    const record=snap.val();
+    if(!isActive(record)){message("Key expired or inactive.");return;}
+    // The callable server function creates the Happ link; never expose privileged server secrets in HTML.
+    const response=await fetch("/api/createHappLink",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({key})});
+    const data=await response.json();
+    if(!response.ok||!data.happLink)throw new Error(data.error||"Happ link generation failed.");
+    $("happLink").textContent=data.happLink;$("result").style.display="block";
+    message("Key verified successfully.","success");
+  }catch(err){message(err.message||"Connection error. Check internet and Firebase rules.");}
+  finally{$("submit").disabled=false;$("submit").textContent="VERIFY & GENERATE LINK";}
+});
+$("copy").addEventListener("click",async()=>{try{await navigator.clipboard.writeText($("happLink").textContent);$("copy").textContent="COPIED";}catch{message("Clipboard access unavailable. Copy the link manually.");}});
+</script>
+</body></html>

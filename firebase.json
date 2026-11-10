@@ -1,0 +1,29 @@
+{
+  "hosting": {
+    "public": "public",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "rewrites": [
+      {
+        "source": "/config.json",
+        "function": {
+          "functionId": "config",
+          "region": "us-central1"
+        }
+      },
+      {
+        "source": "/api/createHappLink",
+        "function": {
+          "functionId": "createHappLink",
+          "region": "us-central1"
+        }
+      }
+    ]
+  },
+  "functions": {
+    "source": "functions"
+  }
+}
